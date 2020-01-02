@@ -1,0 +1,139 @@
+=========================LVM==LVM==LVM==================================
+
+yum install lvm2 -y 
+
+=> CREATE PROCESS:
+
+RECOMMEND: fdisk /dev/sdb ==> n => e (extended) => select all surface 20G => 
+then create all new partition as "l" (logical) in this extended partition.
+
+fdisk /dev/sdb => 
+	n => p with +M G size => t => 1 => 8e => w => partprobe
+
+pvcreate /dev/sdb1
+vgcreate VGNAME /dev/sdb1 or 
+vgcreate -s 8M(extent's size) VGNAME /dev/sdb 
+
+lvcreate --name LVNAME --size +450M VGNAME or
+lvcreate -l 100(extent size) -n LVNAME VGNAME /dev/sdb1 or
+lvcreate --extents 100 --name LVNAME VGNAME  
+
+
+mkfs.xfs /dev/VGNAME/LVNAME
+mkdir /LVNAME
+blkid
+vi /etc/fstab
+	UUID=.... /LVNAME	xfs		defaults	0 0
+mount -av
+
+df -hT
+lsblk
+
+
+================> RESIZE PROCESS
+
+===>lvreduce process <=======
+before: => 
+		umount /lvname's mounted directory
+		e2fsck -f /dev/VGNAME/LVNAME 
+		lvreduce -L 400M /dev/VGNAME/LVNAME ==> mount -av 
+		
+		
+====>increase OR GROW process <================================
+
+lvresize -r --size +550M /dev/VGNAME/LVNAME
+vgextend VGNAME /dev/sdb3 (unused partition, because it wipes data)
+
+	example =>
+		fdisk /dev/sdc => n => extended => t(change type to) = 8e (
+		vgextend VGNAME /dev/sdc
+		lvresize -r -L 10G /dev/VGNAME/LVNAME (we resized LVNAME to 10G
+
+lvextend -L +550M /dev/VGNAME/LVNAME  ( add  LVNAME's LV 550M, 
+-l means: extend size; -L means added size will be added 
+
+=>to grow size of LV => xfs_growfs /dev/VGNAME/LVNAME => mount 
+
+
+
+=> REMOVE PROCESS
+
+umount /dev/VGNAME/LVNAME
+vi /etc/fstab
+	remove the UUID/LVNAME line
+
+lvremove /dev/VGNAME/LVNAME
+vgremove /dev/VGNAME
+vgreduce VGNAME /dev/sdb3 (remove /dev/sdb3 from VGNAME) 
+
+pvremove /dev/sdb1
+
+
+lsblk
+
+fdisk /dev/sdb ==> d   => 1 => w => partprobe
+
+	if fail to shell, make this to fix:
+	shift + PG-UP to see what is problem's title =>
+	==> systemctl status boot.mount <== to see problem's details
+	then => mount => vim /etc/fstab = fix and edit, save => 
+	
+	
+	if fail to dracut, make this to escape:
+		You recall that your root volume was a LVM logical volume. Scan and activate any logical volumes.
+		# lvm vgscan
+		# lvm vgchange -ay
+		
+		lvm lvscan
+		lvm lvchange -a y centos/root
+
+
+=> CREATE SWAP PARTITION
+
+swapon --show (to check)
+
+
+free -m (should be swap:0 , zero)
+fdisk /dev/sdb => 
+	n => l (logical), size +G,M => p (to see) => t => 82 (swap type) =>w=>partprobe
+
+mkswap /dev/sdb6 (new swap partition name-number)
+swapon -a
+blkid => copy UUID=.....
+vi /etc/fstab =>
+	add line: UUID=......	swap	swap defaults	0 0
+free -m (to see new swap size)
+
+==> REMOVING SWAP PARTITION 
+
+lsblk 
+swapoff /dev/mapper/centos-swap
+swapoff -a 
+free -h
+
+
+ 
+
+vi /etc/fstab => put # in front of line of swap partition line 
+mount -a 
+
+free -h 
+blkid
+lsblk 
+
+or if you creat swapfile:
+
+swapoff -v /swapfile
+rm /swapfile 
+
+==========> MIGRATE PV <=========================
+https://www.thegeekdiary.com/centos-rhel-how-to-migrate-storage-lvm-with-pvmove-command/
+
+=> # pvmove -b /dev/mapper/OLD_PV /dev/mapper/NEW_PV  
+(This will take time based on size to complete the activity. 
+-b option in the command above runs the pvmove command in background.)
+
+after moving you can remove PV from VG :
+=> # vgreduce oracleprod /dev/mapper/OLD_PV
+=> # pvremove /dev/mapper/OLD_PV
+
